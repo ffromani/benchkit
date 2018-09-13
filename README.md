@@ -9,7 +9,21 @@ well known automation solution, trying to be self-contained and generic
 
 ## Installation:
 
-TODO
+TL;DR example:
+```
+$ pip install --user -r requirements.txt
+$ cp scripts/* ~/.local/bin
+```
+
+All the scripts in benchkit are self contained, you can just copy somewhere in your PATH and start using them.
+
+### Dependencies
+Make sure you have the dependencies installed.You can use `pip -r requirements.txt` to install them.
+
+For Fedora 28 users
+- pyyaml: the version shipped with the system is just fine
+- parallel-ssh: there is a rpm-packaged version, but it is too old. Please use the version from pip
+
 
 ## Design and implementation
 

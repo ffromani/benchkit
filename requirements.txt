@@ -1,2 +1,2 @@
 parallel-ssh >= 1.8.0
-yaml
+pyyaml
