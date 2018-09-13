@@ -24,15 +24,15 @@ In a nutshell, running a benchmark consists in
 BenchKit concerns itself with steps 1-4.
 It is implemented in a multi-staged approach with a series of script and an orchestration tool.
 
-1. `kvrun` does the setup and teardown of VMs on a KubeVirt environment. It ensures N replicas of the given VM object are setup and are run.
-   Furthermore, `kvrun` produces a mapping of VMs and their IPs (think like /etc/hosts)
-2. `vmrun` takes a mapping of VMs and their IPs (like it is produced by kvrun) and a payload; a payload is a `tgz` archive meeting some criterias documented below.
-   `vmrun` upload the payload on all the configured VMs, unpacks it and runs the payload entry point on all the given VMs. Finally, `vmrun` collects
+1. `mkkvenv` does the setup and teardown of VMs on a KubeVirt environment. It ensures N replicas of the given VM object are setup and are run.
+   Furthermore, `mkkvenv` produces a mapping of VMs and their IPs (think like /etc/hosts)
+2. `runbench` takes a mapping of VMs and their IPs (like it is produced by mkkvenv) and a payload; a payload is a `tgz` archive meeting some criterias documented below.
+   `runbench` upload the payload on all the configured VMs, unpacks it and runs the payload entry point on all the given VMs. Finally, `runbench` collects
    back the output of the entry point (stdout). All the errors (stderr) are collected into a log file.
-   Please note that from the `vmrun` perspective is not relevant if the given VMs are run on bare metal, on kubevirt or anywhere else.
+   Please note that from the `runbench` perspective is not relevant if the given VMs are run on bare metal, on kubevirt or anywhere else.
 3. the benchmark payload spec
-4. `kvbench` is an orchestration tool leveraging both `kvrun` and `vmrun`
-5. both `kvrun` and `vmrun` have user-configurable timeouts. If *all* the VMs are not ready (definition of 'ready' depends on the tool) once timeout is expired,
+4. `kvbench` is an orchestration tool leveraging both `mkkvenv` and `runbench`
+5. both `mkkvenv` and `runbench` have user-configurable timeouts. If *all* the VMs are not ready (definition of 'ready' depends on the tool) once timeout is expired,
    they abort with error.
 
 ## Keys and auth
