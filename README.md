@@ -31,13 +31,15 @@ It is implemented in a multi-staged approach with a series of script and an orch
 5. both `kvrun` and `vmrun` have user-configurable timeouts. If *all* the VMs are not ready (definition of 'ready' depends on the tool) once timeout is expired,
    they abort with error.
 
-## Benchmark payload specification
+## Benchmark payload specification (v1.1)
 
-*IMPORTANT NOTE*: VMs under benchmarking are assumed to be *throw-away*. This means the payload is allowed to perform any possibly-breaking changes to them.
+TODO: add a lint tool
 
 1. the payload is any `tgz` (gzip-compressed tar file)
-2. the payload will be uploaded on the VM, and decompressed on the root directory (/)
+2. the payload will be uploaded on the VM, and decompressed on the given root directory. The default is `/opt/benchkit`
 3. the payload may overwrite any file in the filesystem, even though this is strongly discouraged. They payload should add content.
-4. once the payload is succesfully unpacked, the file "/payload.sh" will be run. The `PATH` will *NOT* be set - don't rely on that.
-5. the call to "/payload.sh" is succesfull if it exits with code 0 (zero). Any other exit code is a failure.
-6. any output (stdout and stderr) produced by "/payload.sh" will be recorded
+4. once the payload is succesfully unpacked, the file "$ROOT/payload.sh" will be run. The `PATH` will *NOT* be set - don't rely on that.
+5. the call to "$ROOT/payload.sh" is succesful if it exits with code 0 (zero). Any other exit code is a failure.
+6. any output (stdout and stderr) produced by "$ROOT/payload.sh" will be recorded
+7. please note that the payload content are *NOT* removed after the execution - even if succesfull, because we cannot guarantee the safeness of the removal - 
+   this is because the payload content may overwrite some system files directory
