@@ -224,7 +224,7 @@ def _main():
         try:
             wait_ready(cmd, created, args.timeout)
         except TimeoutError:
-            sys.exit(1)
+            return 1
 
     if not args.setup_only and not args.teardown_only:
         dump_hosts(cmd.ips(created), sys.stdout)
@@ -236,4 +236,4 @@ def _main():
 
 
 if __name__ == "__main__":
-    _main()
+    sys.exit(_main())
