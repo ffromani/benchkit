@@ -68,19 +68,16 @@ class POD:
     def related_to(self, vm_def):
         return vm_def.name in self.name
 
-    def readiness_status(self):
-        return {
-            cs["name"]: cs["ready"]
-            for cs in self._def["status"]["containerStatuses"]
-        }
-
     @property
     def ip(self):
         return self._def["status"]["podIP"]
 
     @property
     def ready(self):
-        return all(v for v in self.readiness_status().values())
+        return all(
+            cs["ready"]
+            for cs in self._def["status"]["containerStatuses"]
+        )
 
     @property
     def phase(self):
@@ -103,23 +100,21 @@ class Cmd:
 
     def readiness_status(self, vm_defs):
         ret = {}
-        for pod in self.pods():
+        for pod in self.get_pods():
             for vm_def in vm_defs:
                 if pod.related_to(vm_def):
                     ret[vm_def.name] = pod.ready
-
         return ret
 
-    def ips(self, vm_defs):
+    def get_ips(self, vm_defs):
         ret = {}
-        for pod in self.pods():
+        for pod in self.get_pods():
             for vm_def in vm_defs:
                 if pod.related_to(vm_def):
                     ret[vm_def.name] = pod.ip
-
         return ret
 
-    def pods(self):
+    def get_pods(self):
         ret = subprocess.run(
             [self._exe, 'get', 'pods', '-o', 'json'],
             stdout=subprocess.PIPE
@@ -227,7 +222,7 @@ def _main():
             return 1
 
     if not args.setup_only and not args.teardown_only:
-        dump_hosts(cmd.ips(created), sys.stdout)
+        dump_hosts(cmd.get_ips(created), sys.stdout)
         time.sleep(300.)
 
     if not args.setup_only:
