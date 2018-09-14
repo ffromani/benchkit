@@ -16,6 +16,8 @@ $ cp scripts/* ~/.local/bin
 ```
 
 All the scripts in benchkit are self contained, you can just copy somewhere in your PATH and start using them.
+When copying around the scripts, you can drop the ".py" extension if you like. It was added to make the unit tests working,
+it serves no other purposes (IOW the scripts will work just fine without extension)
 
 ### Dependencies
 Make sure you have the dependencies installed.You can use `pip -r requirements.txt` to install them.

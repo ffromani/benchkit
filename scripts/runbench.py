@@ -20,12 +20,15 @@ import uuid
 _AUTH_METHODS = ("password",)
 
 
-def _configure():
+def configure():
+    bench_id = str(uuid.uuid4())
     parser = argparse.ArgumentParser(
         description="A benchmark tool for VMs")
     parser.add_argument("-t", "--timeout", type=int, default=120,
                         help="time (seconds) to wait for the VMs to come up"
                         " - use 0 to disable")
+    parser.add_argument("-U", "--bench-id", type=str, default=bench_id,
+                        help="unique identifier for this run")
     parser.add_argument("-H", "--hosts", type=str, default="/etc/hosts",
                         help="host map to run the benchmark in."
                         " Use '-' to read from stdin.")
@@ -38,10 +41,7 @@ def _configure():
     return parser.parse_args(sys.argv[1:])
 
 
-def read_auth(path):
-    with open(path, 'rt') as src:
-        auth = json.load(src)
-
+def check_auth(auth):
     for key in ('user', 'method', 'details'):
         if key not in auth:
             raise ValueError('malformed auth, missing key: %s' % key)
@@ -53,22 +53,12 @@ def read_auth(path):
     return auth
 
 
-def make_client(auth, hosts):
-    if auth['method'] == 'password':
-        return ParallelSSHClient(
-            hosts.values(),
-            user=auth['user'],
-            password=auth['details']['password'])
-
-    raise RuntimeError('unsupported auth method: %s' % auth['method'])
+def read_auth(path):
+    with open(path, 'rt') as src:
+        return check_auth(json.load(src))
 
 
-def read_hosts(path):
-    if path != '-':
-        src = open(path, 'rt')
-    else:
-        src = sys.stdin
-
+def parse_hosts(src):
     ret = {}
     for line in src:
         data = line.strip()
@@ -80,10 +70,31 @@ def read_hosts(path):
         vm_ip, vm_name = items[0], items[1]
         ret[vm_name] = vm_ip
 
+    return ret
+
+
+def read_hosts(path):
+    if path != '-':
+        src = open(path, 'rt')
+    else:
+        src = sys.stdin
+
+    ret = parse_hosts(src)
+
     if path != '-':
         src.close()
 
     return ret
+
+
+def make_client(auth, hosts):
+    if auth['method'] == 'password':
+        return ParallelSSHClient(
+            hosts.values(),
+            user=auth['user'],
+            password=auth['details']['password'])
+
+    raise RuntimeError('unsupported auth method: %s' % auth['method'])
 
 
 def CommandFailed(RuntimeError):
@@ -138,16 +149,7 @@ def upload_payload(client, src_path, dst_dir):
     return dst_path
 
 
-def _main():
-    bench_id = str(uuid.uuid4())
-
-    logging.basicConfig(
-        format='%(asctime)s' + ' %s ' % bench_id + '%(message)s',
-        datefmt='%m/%d/%Y %H:%M:%S',
-        level=logging.DEBUG
-    )
-    
-    args = _configure()
+def runbench(args):
     hosts = read_hosts(args.hosts)
     auth = read_auth(args.auth_file)
     client = make_client(auth, hosts)
@@ -166,7 +168,19 @@ def _main():
         'cd {root} && /usr/bin/env BENCH_ROOT={root} {root}/payload.sh'.format(root=args.root))
     client.join(output)  # intentionally no timeout
 
-    return process_output(output, bench_id)
+    return process_output(output, args.bench_id)
+
+
+def _main():
+    args = configure()
+
+    logging.basicConfig(
+        format='%(asctime)s' + ' %s ' % args.bench_id + '%(message)s',
+        datefmt='%m/%d/%Y %H:%M:%S',
+        level=logging.DEBUG
+    )
+
+    return runbench(args)
 
 
 if __name__ == "__main__":
