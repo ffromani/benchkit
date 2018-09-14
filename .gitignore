@@ -1,5 +1,7 @@
-scripts/__pycache__
 .pytest_cache
+scripts/__pycache__
 scripts/.pytest_cache
+tests/__pycache__
+tests/.pytest_cache
 auth.json
 hosts

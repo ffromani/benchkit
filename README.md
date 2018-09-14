@@ -27,6 +27,13 @@ For Fedora 28 users
 - parallel-ssh: there is a rpm-packaged version, but it is too old. Please use the version from pip
 
 
+## run the tests
+
+To run the unit tests:
+```
+$ PYTHONPATH="$(pwd)/scripts" pytest
+```
+
 ## Design and implementation
 
 In a nutshell, running a benchmark consists in
