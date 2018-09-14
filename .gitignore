@@ -1,3 +1,5 @@
 scripts/__pycache__
 .pytest_cache
 scripts/.pytest_cache
+auth.json
+hosts
