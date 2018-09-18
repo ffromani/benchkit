@@ -26,10 +26,10 @@ def _configure():
                         help="perform only the teardown step")
     parser.add_argument("-P", "--provision-only", action="store_true",
                         help="perform only the PVC provisioning step")
-    parser.add_argument("-t", "--timeout", type=int, default=120,
+    parser.add_argument("-t", "--timeout", type=int, default=300,
                         help="time (seconds) to wait for the VMs to come up"
                         " - use 0 to disable")
-    parser.add_argument("-i", "--image", type=str, default="disk.qcow2"
+    parser.add_argument("-i", "--image", type=str, default="disk.qcow2",
                         help="disk image to import to provision PV(C)s")
     parser.add_argument("-e", "--endpoint", type=str,
                         default="http://images.kube.lan",
@@ -95,30 +95,77 @@ class VMDef(KubeEntity):
                 ident
             )
             rootvol = self.rootvolume()
-            pvc = rootvol["persistentVolumeClaim"]  # shortcut
             if rootvol is not None:
-                claimName = pvc.get("claimName", "")
-                if claimName:
-                    pvc["claimName"] = "%s-%i" % (
-                        claimName,
+                rootvol.rename_claim("%s-%i" % (
+                        rootvol.claim_name,
                         ident
                     )
-
+                )
 
     @property
     def volumes(self):
-        return self._def["spec"]["template"]["spec"]["volumes"]
+        return [
+            Volume(vol) for vol in
+            self._def["spec"]["template"]["spec"]["volumes"]
+        ]
 
     def rootvolume(self):
         for vol in self.volumes:
-            if _is_rootvolume(vol):
+            if vol.is_root:
                 return vol
         return None
 
 
+class Volume:
+    def __init__(self, vol_def):
+        self._def = vol_def
+
+    @property
+    def name(self):
+        return self._def["name"]
+
+    @property
+    def is_root(self):
+        return self._def.get("name", "") == "rootvolume"
+
+    @property
+    def has_claim(self):
+        return "persistentVolumeClaim" in self._def
+
+    @property
+    def claim_name(self):
+        return self._def.get("persistentVolumeClaim", {}).get("claimName", None)
+
+    def rename_claim(self, name):
+        if self.claim_name is None:
+            return
+
+        self._def["persistentVolumeClaim"]["claimName"] = name
+
+
+
 class PVC(KubeEntity):
+
+    @classmethod
+    def from_yaml(cls, data):
+        return cls(yaml.load(data))
+
     def __init__(self, pvc_def):
         self._def = pvc_def
+
+    def annotate(self, notes):
+        if "annotations" not in self._def["metadata"]:
+            self._def["metadata"]["annotations"] = {}
+
+        self._def["metadata"]["annotations"].update(notes)
+
+    @property
+    def import_phase(self):
+        notes = self._def["metadata"].get("annotations", {})
+        return notes.get(
+            "cdi.kubevirt.io/storage.import.pod.phase",
+            None
+        )
 
 
 class POD(KubeEntity):
@@ -200,36 +247,37 @@ class Cmd:
             if item["kind"] == "PersistentVolumeClaim"
         )
 
-    def add_pvc(self, pvc_def, endpoint, image):
-        if "annotations" not in pvc_def["metadata"]:
-            pvc_def["metadata"]["annotations"] = {}
-
-        pvc_def["metatadata"]["annotations"].update({
+    def add_pvc(self, pvc_obj, endpoint, image):
+        pvc_obj.annotate({
             "cdi.kubevirt.io/storage.import.endpoint":
             "{endpoint}/{image}".format(endpoint=endpoint, image=image),
             "cdi.kubevirt.io/storage.import.secretName": "",
         })
-        return self._run('apply', pvc_def)
+        return self._run('apply', pvc_obj)
 
     def _toggle(self, vm_def, running):
-        return self._runv([
+        return self._runv(
             'patch',
             'virtualmachine',
             vm_def.name,
             '--type',
-            'merge',
+            'json',
             '-p',
-            '\'{"spec":{"running":%s}}\'' % (
-                running=str(running).lower()
+            """- op: replace
+  path: /spec/running
+  value: %s""" % (
+                'true' if running else 'false'
             )
         )
 
     def _runv(self, *args):
+        cmd = [self._exe] + list(args)
         ret = subprocess.run(
-            [self._exe] + args,
+            cmd,
             stdout=subprocess.PIPE
         )
         if ret.returncode != 0:
+            raise RuntimeError("command failed: [%s] " % (' '.join(cmd)))
         return ret
 
     def _run(self, action, spec):
@@ -243,7 +291,7 @@ class Cmd:
         return ret
 
 
-def wait_ready(cmd, vm_defs, timeout):
+def wait_ready_vm(cmd, vm_defs, timeout):
     elapsed = 0  # seconds
     step = 1.0  # seconds
     while True:
@@ -265,48 +313,77 @@ def wait_ready(cmd, vm_defs, timeout):
         elapsed += step
 
 
+def wait_ready_pvc(cmd, pvc_defs, timeout):
+    elapsed = 0  # seconds
+    step = 5.0  # seconds
+    pvc_names = set(pvc.name for pvc in pvc_defs)
+    while True:
+        if elapsed >= timeout:
+            raise TimeoutError("waited %s seconds" % timeout)
+
+        ready, waiting = set(), set()
+        for pvc in cmd.get_pvcs():
+            if pvc.name not in pvc_names:
+                # ignore if not provisioned this time
+                continue
+            if pvc.import_phase == "Succeeded":
+                logging.info("ready: %s" % (pvc.name))
+                ready.add(pvc.name)
+            else:
+                waiting.add(pvc.name)
+        if not waiting:
+            break
+
+        logging.info(
+            "%i/%i PVC ready, waiting...", len(ready), len(pvc_defs))
+        time.sleep(step)
+        elapsed += step
+
+
 def setup(cmd, vm_defs):
     created = []
     for vm_def in vm_defs:
         try:
             cmd.create(vm_def)
-            cmd.start(vm_def)
         except Exception as exc:
-            logging.warning('failed to create: %s', vm_def.name)
+            logging.warning('failed to create: %s (%s)', vm_def.name, exc)
         else:
             created.append(vm_def)
             logging.info('created: %s', vm_def.name)
     return created
 
 
-def _is_rootvolume(vol):
-    return (
-        "persistentVolumeClaim" in vol and
-        vol.get("name", "") == "rootvolume"
-    )
+def start(cmd, vm_defs):
+    for vm_def in vm_defs:
+        try:
+            cmd.start(vm_def)
+        except Exception as exc:
+            logging.warning('failed to create: %s (%s)', vm_def.name, exc)
+        else:
+            logging.info('started: %s', vm_def.name)
 
 
-def _skip_volume(vol):
-    if vol["name"] != "rootvolume":
+def _skip_volume(vol, pvc_names):
+    if not vol.is_root:
         logging.warning(
             "provision: ignoring volume %s (not 'rootvolume')" % (
-                vol["name"]
+                vol.name
             )
         )
         return True
 
-    if "persistentVolumeClaim" not in vol:
+    if not vol.has_claim:
         logging.warning(
             "provision: volume %s has'nt persistent volume claim" % (
-                vol["name"]
+                vol.name
             )
         )
         return True
 
-    if vol["name"] in pvc_names:
+    if vol.claim_name in pvc_names:
         logging.info(
-            "provision: volume %s already present - ignored" % (
-                vol["name"]
+            "provision: volume %s on %s already present - ignored" % (
+                vol.name, vol.claim_name
             )
         )
         return True
@@ -318,23 +395,26 @@ def provision(cmd, vm_defs, endpoint, image):
     pvc_names = set(pvc.name for pvc in cmd.get_pvcs())
     logging.info("provision: start (%d pvcs already found)" % (len(pvc_names)))
 
+    provisioned = set()
     for vm_def in vm_defs:
         for vol in vm_def.volumes:
-            if _skip_volume(vol):
+            if _skip_volume(vol, pvc_names):
                 continue
 
-            logging.info("provision: add volume %s" % (vol["name"]))
-            pvc = yaml.loads(_PVC_TMPL.format(name=vol["name"]))
+            logging.info("provision: add volume %s.%s on %s" % (vm_def.name, vol.name, vol.claim_name))
+            pvc = PVC.from_yaml(_PVC_TMPL.format(name=vol.claim_name))
             cmd.add_pvc(pvc, endpoint, image)
+            provisioned.add(pvc)
 
     logging.info("provision: done")
+    return provisioned
 
 
 def teardown(cmd, vm_defs):
     for vm_def in vm_defs:
         # clean as much as we can:
         try:
-            cmd.stop(vm_def)
+#            cmd.stop(vm_def)
             cmd.delete(vm_def)
         except Exception as exc:
             logging.warning('cannot delete %s: %s', vm_def.name, exc)
@@ -348,6 +428,17 @@ def dump_hosts(vms, out):
         out.write('%s\t\t%s\n' % (vm_ip, vm_name))
     out.write('# END %d available VMs\n' % len(vms))
     out.flush()
+
+
+def _wait_user():
+    logging.info("environment setup! CTRL-C to shutdown")
+    while True:
+        try:
+            time.sleep(1.0)
+        except KeyboardInterrupt:
+            break
+    logging.info("shutting down environment")
+
 
 
 def _main():
@@ -370,35 +461,40 @@ def _main():
     logging.info('%d VM definitions', len(vm_defs))
 
     if not args.teardown_only:
-        provision(cmd, vm_defs, args.endpoint, args.image)
+        provisioned = provision(cmd, vm_defs, args.endpoint, args.image)
+        if args.timeout > 0:
+            try:
+                wait_ready_pvc(cmd, provisioned, args.timeout)
+            except TimeoutError:
+                return 1
         if args.provision_only:
             return 0
 
+    need_wait_user = False
     if not args.teardown_only:
         created = setup(cmd, vm_defs)
-    else:
-        created = vm_defs
 
-    if args.timeout > 0:
-        try:
-            wait_ready(cmd, created, args.timeout)
-        except TimeoutError:
-            return 1
+        start(cmd, created)
 
-    if not args.setup_only and not args.teardown_only:
+        if args.timeout > 0:
+            try:
+                wait_ready_vm(cmd, created, args.timeout)
+            except TimeoutError:
+                return 1
+        need_wait_user = True
+
+    if need_wait_user and not args.setup_only and not args.teardown_only:
         if args.hosts_file == '-':
             dump_hosts(cmd.get_ips(created), sys.stdout)
         else:
             with open(args.hosts_file, 'wt') as hf:
                 dump_hosts(cmd.get_ips(created), hf)
 
-        logging.info("environment setup! CTRL-C to shutdown")
-        while True:
-            time.sleep(1.0)
-        logging.info("shutting down environment")
+        _wait_user()
 
     if not args.setup_only:
-        teardown(cmd, created)
+        target = created if not args.teardown_only else vm_defs
+        teardown(cmd, target)
         # TODO: add wait_gone here
 
 
