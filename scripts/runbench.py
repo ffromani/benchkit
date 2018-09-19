@@ -36,6 +36,8 @@ def configure():
                         help="configuration for authentication")
     parser.add_argument("-r", "--root", type=str, default="/tmp/benchkit",
                         help="payload root directory on benchmarked VMs")
+    parser.add_argument("-v", "--verbose", action="store_true",
+                        help="increase the verbosiness")
     parser.add_argument("payload")
 
     return parser.parse_args(sys.argv[1:])
@@ -150,6 +152,8 @@ def upload_payload(client, src_path, dst_dir):
 
 
 def runbench(args):
+    logging.info('BENCH_ID=%s' % args.bench_id)
+
     hosts = read_hosts(args.hosts)
     auth = read_auth(args.auth_file)
     client = make_client(auth, hosts)
@@ -173,9 +177,10 @@ def runbench(args):
 
 def _main():
     args = configure()
+    extra = '%s ' % args.bench_id if args.verbose else ''
 
     logging.basicConfig(
-        format='%(asctime)s' + ' %s ' % args.bench_id + '%(message)s',
+        format='%(asctime)s ' + extra + '%(message)s',
         datefmt='%m/%d/%Y %H:%M:%S',
         level=logging.DEBUG
     )
