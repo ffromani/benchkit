@@ -181,10 +181,14 @@ class POD(KubeEntity):
 
     @property
     def ready(self):
-        return all(
-            cs["ready"]
-            for cs in self._def["status"]["containerStatuses"]
-        )
+        try:
+            return all(
+                cs["ready"]
+                for cs in self._def["status"]["containerStatuses"]
+            )
+        except KeyError:
+            logging.warning("%s: not even scheduled!" % self.name)
+            return False
 
     @property
     def phase(self):
