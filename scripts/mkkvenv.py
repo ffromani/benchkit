@@ -11,6 +11,8 @@ import logging
 import subprocess
 import sys
 import time
+import urllib.error
+import urllib.request
 
 
 def _configure():
@@ -56,7 +58,7 @@ spec:
   - ReadWriteOnce
   resources:
     requests:
-      storage: 10Gi
+      storage: {size}Gi
 """
 #TODO figure out size
 
@@ -395,6 +397,18 @@ def _skip_volume(vol, pvc_names):
     return False
 
 
+def find_image_size(endpoint, image, timeout=1):
+    url = '%s/info/%s' % (endpoint, image)
+    try:
+        result = json.load(urllib.request.urlopen(url, timeout=timeout))
+    except urllib.error.URLError:
+        # Out of date image server. Return old value for backward
+        # compatibility.
+        # However, the correct thing to do would be raise a exception.
+    else:
+        return max(1, result.get("virtual-size", 0) / 1024. / 1024. / 1024.)
+
+
 def provision(cmd, vm_defs, endpoint, image):
     pvc_names = set(pvc.name for pvc in cmd.get_pvcs())
     logging.info("provision: start (%d pvcs already found)" % (len(pvc_names)))
@@ -405,8 +419,11 @@ def provision(cmd, vm_defs, endpoint, image):
             if _skip_volume(vol, pvc_names):
                 continue
 
-            logging.info("provision: add volume %s.%s on %s" % (vm_def.name, vol.name, vol.claim_name))
-            pvc = PVC.from_yaml(_PVC_TMPL.format(name=vol.claim_name))
+            size = find_image_size(endpoint, image)
+
+            logging.info("provision: add volume %s.%s on %s (%d Gi)" % (
+                vm_def.name, vol.name, vol.claim_name, size))
+            pvc = PVC.from_yaml(_PVC_TMPL.format(name=vol.claim_name, size=size))
             cmd.add_pvc(pvc, endpoint, image)
             provisioned.add(pvc)
 
